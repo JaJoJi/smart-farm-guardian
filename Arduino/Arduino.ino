@@ -6,14 +6,14 @@
 LiquidCrystal_I2C lcd(0x27, 16, 2);
 
 // radar
-#define TRIG1 0
-#define TRIG2 2
-#define TRIG3 10
-#define TRIG4 12
-#define ECHO1 1
-#define ECHO2 3
-#define ECHO3 11
-#define ECHO4 13
+#define TRIG1 2
+#define TRIG2 4
+#define TRIG3 6
+#define TRIG4 10
+#define ECHO1 3
+#define ECHO2 5
+#define ECHO3 7
+#define ECHO4 11
 
 volatile unsigned int d1 = 0;
 volatile unsigned int d2 = 0;
@@ -52,7 +52,7 @@ long radar(int trig,int echo){
 
 void setup() {
   // Serial Monitor for radar
-  Serial.Begin(9600);
+  Serial.begin(9600);
 
   // I2C Esp32-Arduino
   Wire.begin(SLAVE_ADDR);
@@ -89,9 +89,13 @@ void loop() {
   int dt3 = radar(TRIG3,ECHO3);
   int dt4 = radar(TRIG4,ECHO4);
 
+  Serial.print("dt1 ");
   Serial.println(dt1);
+  Serial.print("dt2 ");
   Serial.println(dt2);
+  Serial.print("dt3 ");
   Serial.println(dt3);
+  Serial.print("dt4 ");
   Serial.println(dt4);
 
   if (newData) {
