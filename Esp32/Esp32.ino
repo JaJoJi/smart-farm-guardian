@@ -1,5 +1,6 @@
 #include <Wire.h>
 #include <SimpleTimer.h>   // version ที่คุณลง
+#include "secrets.h"
 
 #define SLAVE_ADDR 0x08
 #define TRIG1 18
