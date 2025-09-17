@@ -1,3 +1,6 @@
+#include <WiFi.h>
+#include <WiFiClient.h>
+#include <BlynkSimpleEsp32.h>
 #include <Wire.h>
 #include <SimpleTimer.h>   // version ที่คุณลง
 #include "secrets.h"
@@ -7,6 +10,9 @@
 #define ECHO1 19
 #define TRIG2 25
 #define ECHO2 26
+
+char ssid[] = SSID;
+char pass[] = PASS;
 
 SimpleTimer timer;   // ตัวจับเวลา
 
@@ -49,6 +55,7 @@ void sendDataToSlave() {
 
 void setup() {
   Serial.begin(115200);
+  Blynk.begin(BLYNK_AUTH_TOKEN, ssid, pass);
   Wire.begin(21, 22); // SDA, SCL
 
   pinMode(TRIG1, OUTPUT);
@@ -61,6 +68,7 @@ void setup() {
 }
 
 void loop() {
+  Blynk.run();
   if (timer.isReady()) {
     sendDataToSlave();
     timer.reset();   // รีเซ็ตนับใหม่
