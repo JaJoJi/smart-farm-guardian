@@ -108,16 +108,17 @@ void loop() {
     delay(25);
 
 
-    Serial.print("angle: ");
     Serial.print(angle);
-    Serial.print(" dt1: ");
+    Serial.print(",");
     Serial.print(dt1);
-    Serial.print(" dt2: ");
+    Serial.print(",");
     Serial.print(dt2);
-    Serial.print(" dt3: ");
+    Serial.print(",");
     Serial.print(dt3);
-    Serial.print(" dt4: ");
-    Serial.println(dt4);
+    Serial.print(",");
+    Serial.print(dt4);
+    Serial.println();
+
 
     RadarServo.write(angle);
     delay(10);  // รอให้ servo ขยับเล็กน้อย
@@ -137,16 +138,17 @@ void loop() {
     delay(25);
 
 
-    Serial.print("angle: ");
     Serial.print(angle);
-    Serial.print(" dt1: ");
+    Serial.print(",");
     Serial.print(dt1);
-    Serial.print(" dt2: ");
+    Serial.print(",");
     Serial.print(dt2);
-    Serial.print(" dt3: ");
+    Serial.print(",");
     Serial.print(dt3);
-    Serial.print(" dt4: ");
-    Serial.println(dt4);
+    Serial.print(",");
+    Serial.print(dt4);
+    Serial.println();
+
 
     RadarServo.write(angle);
     delay(10);
