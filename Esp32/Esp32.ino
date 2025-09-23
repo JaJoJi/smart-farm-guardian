@@ -4,7 +4,7 @@
 #include <WiFiClient.h>
 #include <BlynkSimpleEsp32.h>
 #include <Wire.h>
-#include <DHT.h>
+#include "DHT.h"
 #include <ESP32Servo.h>
 #include <Keypad_I2C.h>
 #include <Keypad.h>
@@ -26,9 +26,9 @@ int PumpPush = 0;
 
 
 // ========== DHT11 ==========
-// #define DHTPIN 4
-// #define DHTTYPE DHT11
-// DHT dht(DHTPIN, DHTTYPE);
+#define DHTPIN 4
+#define DHTTYPE DHT11
+DHT dht(DHTPIN, DHTTYPE);
 
 // ========== Soil Moisture ==========
 #define SOIL1 34
@@ -44,20 +44,20 @@ BlynkTimer timer;
 
 // ========== Blynk Virtual Pins ========== (Waiting)
 // LED OFF/ON
-// BLYNK_WRITE(V0) 
+// BLYNK_WRITE(V0)
 // {
 //   LED_Switch = param.asInt();
 //   digitalWrite(LED_PIN, LED_Switch);
 // }
 
 // // reset/change password
-// // BLYNK_WRITE(V3) {}  
+// // BLYNK_WRITE(V3) {}
 
 // // Gate Servo
 // // BLYNK_WRITE(V8) {}
 
 // // PumpAuto Mode
-// BLYNK_WRITE(V9) 
+// BLYNK_WRITE(V9)
 // {
 //   PumpAuto = param.asInt();
 // }
@@ -78,8 +78,8 @@ long readUltrasonic(int trigPin, int echoPin) {
   delayMicroseconds(10);
   digitalWrite(trigPin, LOW);
   long duration = pulseIn(echoPin, HIGH);
-  if (duration == 0) return -1;                   // timeout / no echo
-  long distance = duration * 0.034 / 2;           // cm
+  if (duration == 0) return -1;          // timeout / no echo
+  long distance = duration * 0.034 / 2;  // cm
   return distance;
 }
 
@@ -122,14 +122,19 @@ int SoilAnalogToPercent(int raw) {
 // ========== readSensor Function ==========
 void readSensor() {
   // DHT11
-  // float h = dht.readHumidity();
-  // float t = dht.readTemperature();
-  // if (!isnan(h) && !isnan(t)) {
-  //   // Blynk.virtualWrite(V1, h);
-  //   // Blynk.virtualWrite(V2, t);
-  // }
+  float h = dht.readHumidity();
+  float t = dht.readTemperature();
+  if (!isnan(h) && !isnan(t)) {
+    // Serial.print(F("ความชื้น: "));
+    // Serial.print(h);
+    // Serial.print(F("%  อุณหภูมิ: "));
+    // Serial.print(t);
+    // Serial.println(F("°C "));
+    Blynk.virtualWrite(V1, h);
+    Blynk.virtualWrite(V2, t);
+  }
 
-  // Soil
+  // // Soil
   int soilRaw1 = analogRead(SOIL1);
   int soilRaw2 = analogRead(SOIL2);
 
@@ -140,7 +145,7 @@ void readSensor() {
   // Serial.println(s1);
   // Serial.println(s2);
 
-  // Ultrasonic
+  // // Ultrasonic
   long d1 = readUltrasonic(TRIG1, ECHO1);
   long d2 = readUltrasonic(TRIG2, ECHO2);
   if (d1 < 0) d1 = 0;
@@ -165,6 +170,7 @@ void readSensor() {
 // ========== Setup ==========
 void setup() {
   Serial.begin(115200);
+  dht.begin();
   Blynk.begin(BLYNK_AUTH_TOKEN, WIFI_SSID, WIFI_PASS);
   // Wire.begin(21, 22);  // SDA, SCL
 
@@ -183,9 +189,4 @@ void setup() {
 void loop() {
   Blynk.run();
   timer.run();
-  // if (timer.isReady()) {
-  //   // sendDataToSlave();
-  //   timer.reset();  // รีเซ็ตนับใหม่
-  // }
-
 }
