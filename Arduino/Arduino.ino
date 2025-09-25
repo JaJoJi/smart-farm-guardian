@@ -4,9 +4,9 @@
 #include <Servo.h>    // Servo Radar
 
 #define SLAVE_ADDR 0x08
-LiquidCrystal_I2C lcd(0x27, 16, 2);
+// LiquidCrystal_I2C lcd(0x27, 16, 2);
 
-// radar
+// Radar
 #define TRIG1 2
 #define TRIG2 4
 #define TRIG3 6
@@ -15,29 +15,59 @@ LiquidCrystal_I2C lcd(0x27, 16, 2);
 #define ECHO2 5
 #define ECHO3 7
 #define ECHO4 11
-// radar servo
+// Radar Servo
 #define ServoDrift 9
 Servo RadarServo;
+// Door Lock Servo
+#define ServoDrive A2
+Servo LockServo;
+// Buzzer Alarm
+#define BuzzerAlarm 8
+// WaterPump
+#define WaterPump A0
+// LED1
+#define LordFai A1
 
-volatile unsigned int d1 = 0;
-volatile unsigned int d2 = 0;
 volatile bool newData = false;
-
 unsigned long lastUpdate = 0;
+volatile uint8_t Lock1 = 0;          // ประกาศเป็น global ตรงนี้
+volatile uint8_t PumpActivate1 = 0;  // ประกาศเป็น global ตรงนี้
+volatile uint8_t LED1 = 0;           // ประกาศเป็น global ตรงนี้
 
 // Order from Esp32
 void receiveEvent(int howMany) {
-  if (howMany >= 4) {
-    uint8_t d1L = Wire.read();
-    uint8_t d1H = Wire.read();
-    uint8_t d2L = Wire.read();
-    uint8_t d2H = Wire.read();
-
-    d1 = word(d1H, d1L);
-    d2 = word(d2H, d2L);
-
+  if (howMany >= 2) {
+    byte type = Wire.read();   // Byte1
+    byte value = Wire.read();  // Byte2
     newData = true;
     lastUpdate = millis();
+
+    switch (type) {
+      case 0:  // LED
+        digitalWrite(LordFai, value);
+        Serial.println(value);
+        break;
+
+      case 1:  // Gate
+        Lock1 = value;
+        Serial.println(Lock1);
+        // อัปเดต DoorLock
+        if (Lock1 == 1) {
+          LockServo.write(70);
+          tone(BuzzerAlarm, 1000, 200);  // บี๊บที่ 1kHz นาน 200ms
+          wdt_reset();
+        } else {
+          LockServo.write(0);
+          tone(BuzzerAlarm, 500, 1000);  // บี๊บที่ 500Hz นาน 500ms
+          wdt_reset();
+        }
+        break;
+
+      case 2:  // Pump
+        digitalWrite(WaterPump, value);
+        Serial.println(value);
+        break;
+    }
   }
   while (Wire.available()) Wire.read();  // flush
 }
@@ -64,15 +94,6 @@ void setup() {
   Wire.begin(SLAVE_ADDR);
   Wire.onReceive(receiveEvent);
 
-  // LCD
-  lcd.init();
-  lcd.backlight();
-  lcd.clear();
-  lcd.setCursor(0, 0);
-  lcd.print("UNO I2C Ready");
-  delay(500);
-  lcd.clear();
-
   // Setup radar
   pinMode(ECHO1, INPUT);
   pinMode(ECHO2, INPUT);
@@ -84,11 +105,25 @@ void setup() {
   pinMode(TRIG3, OUTPUT);
   pinMode(TRIG4, OUTPUT);
 
+  //BuzzerAlarm
+  pinMode(BuzzerAlarm, OUTPUT);
+
+  //LED
+  pinMode(LordFai, OUTPUT);
+
+  // Pump
+  pinMode(WaterPump, OUTPUT);
+
   // Radar Servo
   RadarServo.attach(ServoDrift, 500, 2500);
 
+  //Door Lock Servo
+  LockServo.attach(ServoDrive);
+
   // เปิด watchdog 8 วินาที
   wdt_enable(WDTO_8S);
+  
+  LockServo.write(0);
 }
 
 int angle = 0;    // มุมปัจจุบัน
@@ -99,29 +134,31 @@ void loop() {
   for (int angle = 0; angle <= 180; angle++) {
     // อ่าน ultrasonic ทุก sensor
     int dt1 = radar(TRIG1, ECHO1);
-    delay(25);
+    delay(60);
     int dt2 = radar(TRIG2, ECHO2);
-    delay(25);
+    delay(60);
     int dt3 = radar(TRIG3, ECHO3);
-    delay(25);
+    delay(60);
     int dt4 = radar(TRIG4, ECHO4);
-    delay(25);
+    delay(60);
 
-
-    Serial.print(angle);
-    Serial.print(",");
-    Serial.print(dt1);
-    Serial.print(",");
-    Serial.print(dt2);
-    Serial.print(",");
-    Serial.print(dt3);
-    Serial.print(",");
-    Serial.print(dt4);
-    Serial.println();
-
+    // Serial.print(angle);
+    // Serial.print(",");
+    // Serial.print(dt1);
+    // Serial.print(",");
+    // Serial.print(dt2);
+    // Serial.print(",");
+    // Serial.print(dt3);
+    // Serial.print(",");
+    // Serial.print(dt4);
+    // Serial.println();
 
     RadarServo.write(angle);
     delay(10);  // รอให้ servo ขยับเล็กน้อย
+
+    if ((dt1 != -1 && dt1 <= 20) || (dt2 != -1 && dt2 <= 20) || (dt3 != -1 && dt3 <= 20) || (dt4 != -1 && dt4 <= 20)) {
+      tone(BuzzerAlarm, 1000, 200);  // บี๊บ 1kHz 200ms
+    }
 
     wdt_reset();
   }
@@ -129,54 +166,52 @@ void loop() {
   // หมุนกลับ 180 -> 0
   for (int angle = 180; angle >= 0; angle--) {
     int dt1 = radar(TRIG1, ECHO1);
-    delay(25);
+    delay(60);
     int dt2 = radar(TRIG2, ECHO2);
-    delay(25);
+    delay(60);
     int dt3 = radar(TRIG3, ECHO3);
-    delay(25);
+    delay(60);
     int dt4 = radar(TRIG4, ECHO4);
-    delay(25);
+    delay(60);
 
-
-    Serial.print(angle);
-    Serial.print(",");
-    Serial.print(dt1);
-    Serial.print(",");
-    Serial.print(dt2);
-    Serial.print(",");
-    Serial.print(dt3);
-    Serial.print(",");
-    Serial.print(dt4);
-    Serial.println();
+    // Serial.print(angle);
+    // Serial.print(",");
+    // Serial.print(dt1);
+    // Serial.print(",");
+    // Serial.print(dt2);
+    // Serial.print(",");
+    // Serial.print(dt3);
+    // Serial.print(",");
+    // Serial.print(dt4);
+    // Serial.println();
 
 
     RadarServo.write(angle);
     delay(10);
+
+    if ((dt1 != -1 && dt1 <= 20) || (dt2 != -1 && dt2 <= 20) || (dt3 != -1 && dt3 <= 20) || (dt4 != -1 && dt4 <= 20)) {
+      tone(BuzzerAlarm, 1000, 200);  // บี๊บ 1kHz 200ms
+    }
+
     wdt_reset();
   }
 
-
-  // ✅ reset watchdog เฉพาะเมื่อได้รับข้อมูลใหม่
+  // reset watchdog เฉพาะเมื่อได้รับข้อมูลใหม่
   if (newData) {
     newData = false;  // เคลียร์ flag
 
-    // อัปเดต LCD
-    lcd.setCursor(0, 0);
-    lcd.print("D1:");
-    lcd.print(d1);
-    lcd.print("cm");
-    lcd.print("           ");  // ลบเศษตัวเลขเก่า
-
-    lcd.setCursor(0, 1);
-    lcd.print("D2:");
-    lcd.print(d2);
-    lcd.print("cm");
-    lcd.print("           ");
-
-    // reset watchdog เมื่อ update สำเร็จ
-    wdt_reset();
+    // อัปเดต DoorLock
+    if (Lock1 == 1) {
+      LockServo.write(70);
+      tone(BuzzerAlarm, 1000, 200);  // บี๊บที่ 1kHz นาน 200ms
+      wdt_reset();
+    } else {
+      LockServo.write(0);
+      tone(BuzzerAlarm, 500, 1000);  // บี๊บที่ 500Hz นาน 500ms
+      wdt_reset();
+    }
   }
 
-  // ❌ ถ้า ESP32 timeout ไม่ส่ง → newData ไม่ถูก set → watchdog จะไม่ reset → reset บอร์ดเองภายใน 8s
+  // ถ้า ESP32 timeout ไม่ส่ง → newData ไม่ถูก set → watchdog จะไม่ reset → reset บอร์ดเองภายใน 8s
   delay(200);
 }
