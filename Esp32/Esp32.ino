@@ -19,12 +19,12 @@ LiquidCrystal_I2C lcdKeypad(0x3F, 16, 2);
 LiquidCrystal_I2C lcdSensor(0x27, 16, 2);
 
 // ========== Variables (Outside Function) ==========
-float h; 
+float h;
 float t;
-int soilPercent1; 
+int soilPercent1;
 int soilPercent2;
-long d1;
-long d2; 
+long Plant1;
+long Plant2;
 
 int LEDStatus = 0;
 int gateStatus = 0;
@@ -62,11 +62,58 @@ DHT dht(DHTPIN, DHTTYPE);
 #define LED_PIN 2
 #define PUMP_PIN 32
 
-
 // ========== Timer ==========
 BlynkTimer timer;
 
-// ========== Blynk Virtual Pins ========== (Waiting)
+// ========== Interrupt ==========
+#define INT_PIN 27
+volatile bool dataReady = false;
+
+void IRAM_ATTR handleInterrupt() {
+  dataReady = true;
+  Serial.println("Interrpted");
+}
+
+void requestSensorData() {
+  uint16_t d[5];  // d[0]=d1, d[1]=d2, d[2]=d3, d[3]=d4, d[4]=angle
+
+  Wire.requestFrom(ARDUINO_ADDR, 10);
+  if (Wire.available() == 10) {
+    for (int i = 0; i < 5; i++) {
+      byte low = Wire.read();
+      byte high = Wire.read();
+      d[i] = (high << 8) | low;  // Little Endian
+    }
+  } else {
+    Serial.println("I2C read failed!");
+    return;
+  }
+
+  Serial.printf("D1:%u cm, D2:%u cm, D3:%u cm, D4:%u cm, Angle:%u deg\n",
+                d[0], d[1], d[2], d[3], d[4]);
+
+  // ตรวจสอบทิศ
+  String direction = "Unknown";
+  if (d[0] <= 10 && d[4] >= 0 && d[4] < 45) direction = "North-East";
+  else if (d[0] <= 10 && d[4] >= 45 && d[4] < 135) direction = "North";
+  else if (d[0] <= 10 && d[4] >= 135 && d[4] <= 180) direction = "North-West";
+  else if (d[1] <= 10 && d[4] >= 0 && d[4] < 45) direction = "North-West";
+  else if (d[1] <= 10 && d[4] >= 45 && d[4] < 135) direction = "West";
+  else if (d[1] <= 10 && d[4] >= 135 && d[4] <= 180) direction = "South-West";
+  else if (d[2] <= 10 && d[4] >= 0 && d[4] < 45) direction = "South-East";
+  else if (d[2] <= 10 && d[4] >= 45 && d[4] < 135) direction = "East";
+  else if (d[2] <= 10 && d[4] >= 135 && d[4] <= 180) direction = "North-East";
+  else if (d[3] <= 10 && d[4] >= 0 && d[4] < 45) direction = "South-West";
+  else if (d[3] <= 10 && d[4] >= 45 && d[4] < 135) direction = "South";
+  else if (d[3] <= 10 && d[4] >= 135 && d[4] <= 180) direction = "South-East";
+
+  Serial.println(direction);
+
+
+  // Blynk.logEvent("object_detected", "Detected: " + direction);
+}
+
+// ========== Blynk Virtual ==========
 // LED OFF/ON
 BLYNK_WRITE(V0) {
   LEDStatus = param.asInt();
@@ -90,17 +137,27 @@ BLYNK_WRITE(V3) {
 BLYNK_WRITE(V8) {  // Gate Control from Blynk
   gateStatus = param.asInt();
   sendDataToArduino(1, gateStatus);
+  if (gateStatus == 1) {
+    passwordAccepted = true;  // ยืนยันว่าเข้าสู่โหมดใช้งาน
+    lcdKeypad.clear();
+    lcdKeypad.setCursor(0, 0);
+    lcdKeypad.print("Gate Opened");
+  } else {
+    passwordAccepted = false;  // ออกจากโหมด
+    inputPassword = "";
+    lcdKeypad.clear();
+    lcdKeypad.setCursor(0, 0);
+    lcdKeypad.print("Gate Closed");
+    delay(1000);
+    lcdKeypad.clear();
+    lcdKeypad.setCursor(0, 0);
+    lcdKeypad.print("Enter Password:");
+  }
 }
 
 // PumpAuto Mode
-BLYNK_WRITE(V9) {   // Pump Auto
+BLYNK_WRITE(V9) {  // Pump Auto
   PumpAuto = param.asInt();
-  if (PumpAuto == 1) {
-    PumpStatus = 1;
-  } else {
-    PumpStatus = 0;
-  }
-  sendDataToArduino(2, PumpStatus);
 }
 
 // Pump Push Switch
@@ -159,7 +216,8 @@ void KeypadGate() {
         gateStatus = 1;
         Blynk.virtualWrite(V8, 1);
         passwordAccepted = true;  // ยืนยันว่าเข้าสู่โหมดใช้งาน
-        sendDataToArduino(1, gateStatus);;
+        sendDataToArduino(1, gateStatus);
+        ;
       } else {
         lcdKeypad.clear();
         lcdKeypad.setCursor(0, 0);
@@ -188,9 +246,18 @@ void KeypadGate() {
         lcdKeypad.print("Enter Password:");
         passwordAccepted = false;  // ออกจากโหมด
         inputPassword = "";
-        sendDataToArduino(1, gateStatus);;
+        sendDataToArduino(1, gateStatus);
+        LEDStatus = 0;  // สลับสถานะ
+        Blynk.virtualWrite(V0, LEDStatus);
+        sendDataToArduino(0, LEDStatus);
       }
-      // else if (key == 'A' || key == 'B' || key == 'C') {
+
+      if (key == 'A') {
+        LEDStatus = !LEDStatus;  // สลับสถานะ
+        Blynk.virtualWrite(V0, LEDStatus);
+        sendDataToArduino(0, LEDStatus);
+      }
+      // else if (key == 'B' || key == 'C') {
       //   // ฟังก์ชันอื่น ๆ ของ A, B, C
       //   Serial.print("Key pressed: ");
       //   Serial.println(key);
@@ -287,8 +354,8 @@ void readSensor() {
   unsigned long currentMillis = millis();
   if (currentMillis - lastUpdate >= updateInterval) {
     lastUpdate = currentMillis;
-    
-    if (lcdPage == 0) { // DHT11
+
+    if (lcdPage == 0) {  // DHT11
       h = dht.readHumidity();
       t = dht.readTemperature();
       if (!isnan(h) && !isnan(t)) {
@@ -301,35 +368,41 @@ void readSensor() {
         lcdSensor.print(t);
         lcdSensor.print(" C");
       }
-    } 
-    else if (lcdPage == 1) { // Soil
+    } else if (lcdPage == 1) {  // Soil
       soilPercent1 = SoilAnalogToPercent(analogRead(SOIL1));
       soilPercent2 = SoilAnalogToPercent(analogRead(SOIL2));
       lcdSensor.clear();
       lcdSensor.setCursor(0, 0);
-      lcdSensor.print("P1 : ");
+      lcdSensor.print("SoilP1 : ");
       lcdSensor.print(soilPercent1);
       lcdSensor.setCursor(0, 1);
-      lcdSensor.print("P2 : ");
+      lcdSensor.print("SoilP2 : ");
       lcdSensor.print(soilPercent2);
-    } 
-    else if (lcdPage == 2) {
-      d1 = readUltrasonic(TRIG1, ECHO1);
-      d2 = readUltrasonic(TRIG2, ECHO2);
+    } else if (lcdPage == 2) {
+      Plant1 = readUltrasonic(TRIG1, ECHO1);
+      Plant2 = readUltrasonic(TRIG2, ECHO2);
       lcdSensor.clear();
       lcdSensor.setCursor(0, 0);
-      lcdSensor.print("D1= ");
-      lcdSensor.print(d1);
+      lcdSensor.print("Plant1 = ");
+      lcdSensor.print(Plant1);
+      lcdSensor.print(" cm");
       lcdSensor.setCursor(0, 1);
-      lcdSensor.print("D2= ");
-      lcdSensor.print(d2);
+      lcdSensor.print("Plant2 = ");
+      lcdSensor.print(Plant2);
+      lcdSensor.print(" cm");
+      if (Plant1 <= 3) {
+        Blynk.logEvent("harvest_time", "Let's Harvest! Plant1 : " + String(Plant1) + " cm");
+      }
+      if (Plant2 <= 3) {
+        Blynk.logEvent("harvest_time", "Let's Harvest! Plant2 : " + String(Plant1) + " cm");
+      }
     }
     Blynk.virtualWrite(V1, h);
     Blynk.virtualWrite(V2, t);
     Blynk.virtualWrite(V4, soilPercent1);
     Blynk.virtualWrite(V5, soilPercent2);
-    Blynk.virtualWrite(V6, d1);
-    Blynk.virtualWrite(V7, d2);
+    Blynk.virtualWrite(V6, Plant1);
+    Blynk.virtualWrite(V7, Plant2);
     // เปลี่ยนหน้า LCD
     lcdPage++;
     if (lcdPage > 2) lcdPage = 0;
@@ -351,6 +424,9 @@ void setup() {
   pinMode(LED_PIN, OUTPUT);
   pinMode(PUMP_PIN, OUTPUT);
 
+  pinMode(INT_PIN, INPUT_PULLUP);
+  attachInterrupt(digitalPinToInterrupt(INT_PIN), handleInterrupt, RISING);
+
   lcdKeypad.begin();
   lcdKeypad.backlight();
   lcdKeypad.clear();
@@ -369,4 +445,16 @@ void loop() {
   Blynk.run();
   timer.run();
   KeypadGate();
+  if (dataReady) {
+    dataReady = false;
+    requestSensorData();
+  }
+  if (PumpAuto == 1) {
+    if (soilPercent1 < 45 || soilPercent2 < 45) {
+      PumpStatus = 1;
+    } else {
+      PumpStatus = 0;
+    }
+    sendDataToArduino(2, PumpStatus);
+  }
 }
