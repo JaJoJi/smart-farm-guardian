@@ -117,7 +117,7 @@ void setup() {
   Wire.onRequest(GetRequest);
 
   // Interrupt output to ESP32
-  pinMode(SendISRtoESP32, OUTPUT);  // 
+  pinMode(SendISRtoESP32, OUTPUT);  
 
   // Setup radar
   pinMode(ECHO1, INPUT);
