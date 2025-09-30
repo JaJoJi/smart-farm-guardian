@@ -5,20 +5,22 @@
 #include <BlynkSimpleEsp32.h>
 #include <Wire.h>
 #include "DHT.h"
-#include <ESP32Servo.h>
 #include <LiquidCrystal_I2C.h>
 #include <Keypad_I2C.h>
 #include <Keypad.h>
+#include <TimeLib.h>
+#include <DS1307RTC.h>
 
 // ========== Slave Address ==========
 #define ARDUINO_ADDR 0x08
 #define Keypad_ADDR 0x20
 #define EEPROM_ADDR 0x50
+#define RTC_ADDR 0x68
 
-LiquidCrystal_I2C lcdKeypad(0x3F, 16, 2);
-LiquidCrystal_I2C lcdSensor(0x27, 16, 2);
+LiquidCrystal_I2C lcdKeypad(0x27, 16, 2);
+LiquidCrystal_I2C lcdSensor(0x3F, 16, 2);
 
-// ========== Variables (Outside Function) ==========
+// ========== Global Variables ==========
 float h;
 float t;
 int soilPercent1;
@@ -37,6 +39,8 @@ bool waitingPassword = false;
 bool passwordAccepted = false;
 String correctPassword = "1234";
 String inputPassword = "";
+
+bool showDateTime = false;
 
 unsigned long lastUpdate = 0;
 const long updateInterval = 5000;
@@ -58,59 +62,148 @@ DHT dht(DHTPIN, DHTTYPE);
 #define SOIL1 34
 #define SOIL2 35
 
-// ========== Pump / LED ==========
-#define LED_PIN 2
-#define PUMP_PIN 32
-
 // ========== Timer ==========
 BlynkTimer timer;
+tmElements_t tm;
+
+// ========== Timer Function ==========
+bool getTime(const char *str) {
+  int Hour, Min, Sec;
+  if (sscanf(str, "%d:%d:%d", &Hour, &Min, &Sec) != 3) return false;
+  tm.Hour = Hour;
+  tm.Minute = Min;
+  tm.Second = Sec;
+  return true;
+}
+
+bool getDate(const char *str) {
+  char Month[12];
+  int Day, Year;
+  static const char *monthName[12] = { "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec" };
+  uint8_t monthIndex;
+  if (sscanf(str, "%s %d %d", Month, &Day, &Year) != 3) return false;
+  for (monthIndex = 0; monthIndex < 12; monthIndex++) {
+    if (strcmp(Month, monthName[monthIndex]) == 0) break;
+  }
+  if (monthIndex >= 12) return false;
+  tm.Day = Day;
+  tm.Month = monthIndex + 1;
+  tm.Year = CalendarYrToTm(Year);
+  return true;
+}
+
+void print2digits(int number) {
+  if (number >= 0 && number < 10) Serial.write('0');
+  Serial.print(number);
+}
 
 // ========== Interrupt ==========
 #define INT_PIN 27
 volatile bool dataReady = false;
 
+// ========== Interrupt  Function ==========
 void IRAM_ATTR handleInterrupt() {
   dataReady = true;
-  Serial.println("Interrpted");
 }
 
-void requestSensorData() {
-  uint16_t d[5];  // d[0]=d1, d[1]=d2, d[2]=d3, d[3]=d4, d[4]=angle
+uint16_t lastValidData[5] = { 0, 0, 0, 0, 0 };  // เก็บค่าล่าสุดที่ถูกต้อง
 
-  Wire.requestFrom(ARDUINO_ADDR, 10);
-  if (Wire.available() == 10) {
-    for (int i = 0; i < 5; i++) {
-      byte low = Wire.read();
-      byte high = Wire.read();
-      d[i] = (high << 8) | low;  // Little Endian
+void requestSensorData() {
+  uint16_t d[5];
+
+  int bytes = Wire.requestFrom(ARDUINO_ADDR, 10);
+  if (bytes != 10) {
+    Serial.printf("Expected 10 bytes, got %d\n", bytes);
+    return;  // อ่านไม่ครบ ออกเลย
+  }
+
+  bool error = false;
+  for (int i = 0; i < 5; i++) {
+    int low = Wire.read();
+    int high = Wire.read();
+    if (low == -1 || high == -1) {
+      Serial.printf("I2C data error at index %d (-1 received)\n", i);
+      error = true;
+      break;
     }
+    d[i] = ((uint16_t)high << 8) | (uint16_t)low;
+  }
+
+  if (error) {
+    // ใช้ค่าล่าสุดแทน
+    memcpy(d, lastValidData, sizeof(d));
+    Serial.println("Using last valid data instead of corrupted");
   } else {
-    Serial.println("I2C read failed!");
-    return;
+    // เก็บค่าล่าสุดไว้
+    memcpy(lastValidData, d, sizeof(d));
   }
 
   Serial.printf("D1:%u cm, D2:%u cm, D3:%u cm, D4:%u cm, Angle:%u deg\n",
                 d[0], d[1], d[2], d[3], d[4]);
 
-  // ตรวจสอบทิศ
+  // ===== ตรวจสอบทิศ =====
   String direction = "Unknown";
-  if (d[0] <= 10 && d[4] >= 0 && d[4] < 45) direction = "North-East";
-  else if (d[0] <= 10 && d[4] >= 45 && d[4] < 135) direction = "North";
-  else if (d[0] <= 10 && d[4] >= 135 && d[4] <= 180) direction = "North-West";
-  else if (d[1] <= 10 && d[4] >= 0 && d[4] < 45) direction = "North-West";
-  else if (d[1] <= 10 && d[4] >= 45 && d[4] < 135) direction = "West";
-  else if (d[1] <= 10 && d[4] >= 135 && d[4] <= 180) direction = "South-West";
-  else if (d[2] <= 10 && d[4] >= 0 && d[4] < 45) direction = "South-East";
-  else if (d[2] <= 10 && d[4] >= 45 && d[4] < 135) direction = "East";
-  else if (d[2] <= 10 && d[4] >= 135 && d[4] <= 180) direction = "North-East";
-  else if (d[3] <= 10 && d[4] >= 0 && d[4] < 45) direction = "South-West";
-  else if (d[3] <= 10 && d[4] >= 45 && d[4] < 135) direction = "South";
-  else if (d[3] <= 10 && d[4] >= 135 && d[4] <= 180) direction = "South-East";
+  if (d[0] <= 10 && d[4] < 45) {
+    direction = "North-East";
+    Blynk.logEvent("north_radar_detected", "Direction: " + direction);
+  } else if (d[0] <= 10 && d[4] < 135) {
+    direction = "North";
+    Blynk.logEvent("north_radar_detected", "Direction: " + direction);
+  } else if (d[0] <= 10 && d[4] <= 180) {
+    direction = "North-West";
+    Blynk.logEvent("north_radar_detected", "Direction: " + direction);
+  } else if (d[1] <= 10 && d[4] < 45) {
+    direction = "North-West";
+    Blynk.logEvent("west_radar_detected", "Direction: " + direction);
+  } else if (d[1] <= 10 && d[4] < 135) {
+    direction = "West";
+    Blynk.logEvent("west_radar_detected", "Direction: " + direction);
+  } else if (d[1] <= 10 && d[4] <= 180) {
+    direction = "South-West";
+    Blynk.logEvent("west_radar_detected", "Direction: " + direction);
+  } else if (d[2] <= 10 && d[4] < 45) {
+    direction = "South-East";
+    Blynk.logEvent("east_radar_detected", "Direction: " + direction);
+  } else if (d[2] <= 10 && d[4] < 135) {
+    direction = "East";
+    Blynk.logEvent("east_radar_detected", "Direction: " + direction);
+  } else if (d[2] <= 10 && d[4] <= 180) {
+    direction = "North-East";
+    Blynk.logEvent("east_radar_detected", "Direction: " + direction);
+  } else if (d[3] <= 10 && d[4] < 45) {
+    direction = "South-West";
+    Blynk.logEvent("south_radar_detected", "Direction: " + direction);
+  } else if (d[3] <= 10 && d[4] < 135) {
+    direction = "South";
+    Blynk.logEvent("south_radar_detected", "Direction: " + direction);
+  } else if (d[3] <= 10 && d[4] <= 180) {
+    direction = "South-East";
+    Blynk.logEvent("south_radar_detected", "Direction: " + direction);
+  } else {
+    return;  // ไม่มีวัตถุในระยะ 10 cm
 
-  Serial.println(direction);
-
-
-  // Blynk.logEvent("object_detected", "Detected: " + direction);
+    Serial.println(direction);
+  }
+}
+// ========================= SHOW DATETIME =========================
+void updateDateTimeOnLCD() {
+  tmElements_t tmLocal;
+  if (RTC.read(tmLocal)) {
+    char buf1[17], buf2[17];
+    int year = tmYearToCalendar(tmLocal.Year) + 543;
+    sprintf(buf1, "%02d/%02d/%04d", tmLocal.Day, tmLocal.Month, year);
+    sprintf(buf2, "%02d:%02d:%02d", tmLocal.Hour, tmLocal.Minute, tmLocal.Second);
+    lcdKeypad.setCursor(0, 0);
+    lcdKeypad.print("Date: ");
+    lcdKeypad.print(buf1);
+    lcdKeypad.setCursor(0, 1);
+    lcdKeypad.print("Time: ");
+    lcdKeypad.print(buf2);
+  } else {
+    lcdKeypad.clear();
+    lcdKeypad.setCursor(0, 0);
+    lcdKeypad.print("RTC Error!");
+  }
 }
 
 // ========== Blynk Virtual ==========
@@ -205,8 +298,7 @@ void KeypadGate() {
       lcdKeypad.clear();
       lcdKeypad.setCursor(0, 0);
       lcdKeypad.print("Enter Password:");
-      passwordAccepted = false;  // reset
-
+      passwordAccepted = false;                // reset
     } else if (key == '#') {                   // ยืนยัน
       String savedPass = eepromReadString(0);  // อ่านจาก EEPROM
       if (inputPassword == savedPass) {
@@ -217,7 +309,17 @@ void KeypadGate() {
         Blynk.virtualWrite(V8, 1);
         passwordAccepted = true;  // ยืนยันว่าเข้าสู่โหมดใช้งาน
         sendDataToArduino(1, gateStatus);
-        ;
+
+        if (RTC.read(tm)) {
+          int currentHour = tm.Hour;
+          if (currentHour >= 18 || currentHour < 5) {
+            LEDStatus = 1;
+          } else {
+            LEDStatus = 0;
+          }
+          Blynk.virtualWrite(V0, LEDStatus);
+          sendDataToArduino(0, LEDStatus);
+        }
       } else {
         lcdKeypad.clear();
         lcdKeypad.setCursor(0, 0);
@@ -231,7 +333,16 @@ void KeypadGate() {
         lcdKeypad.setCursor(0, 0);
         lcdKeypad.print("Enter Password:");
       }
-
+    } else if (key == 'B') {
+      if (showDateTime) {
+        showDateTime = false;
+        lcdKeypad.clear();
+        lcdKeypad.setCursor(0, 0);
+        lcdKeypad.print("Enter Password:");
+      } else {
+        showDateTime = true;
+        updateDateTimeOnLCD();
+      }
     } else if (passwordAccepted) {
       // ===== โหมดหลังใส่รหัสถูกต้อง =====
       if (key == 'D') {
@@ -257,7 +368,7 @@ void KeypadGate() {
         Blynk.virtualWrite(V0, LEDStatus);
         sendDataToArduino(0, LEDStatus);
       }
-      // else if (key == 'B' || key == 'C') {
+      // else if (key == 'C') {
       //   // ฟังก์ชันอื่น ๆ ของ A, B, C
       //   Serial.print("Key pressed: ");
       //   Serial.println(key);
@@ -279,6 +390,9 @@ void KeypadGate() {
         }
       }
     }
+  }
+  if (showDateTime) {
+    updateDateTimeOnLCD();
   }
 }
 
@@ -384,25 +498,25 @@ void readSensor() {
       lcdSensor.clear();
       lcdSensor.setCursor(0, 0);
       lcdSensor.print("Plant1 = ");
-      lcdSensor.print(Plant1);
+      lcdSensor.print(15 - Plant1);
       lcdSensor.print(" cm");
       lcdSensor.setCursor(0, 1);
       lcdSensor.print("Plant2 = ");
-      lcdSensor.print(Plant2);
+      lcdSensor.print(15 - Plant2);
       lcdSensor.print(" cm");
       if (Plant1 <= 3) {
-        Blynk.logEvent("harvest_time", "Let's Harvest! Plant1 : " + String(Plant1) + " cm");
+        Blynk.logEvent("harvest_time", "Let's Harvest! Plant1 : " + String(15 - Plant1) + " cm");
       }
       if (Plant2 <= 3) {
-        Blynk.logEvent("harvest_time", "Let's Harvest! Plant2 : " + String(Plant1) + " cm");
+        Blynk.logEvent("harvest_time", "Let's Harvest! Plant2 : " + String(15 - Plant2) + " cm");
       }
     }
     Blynk.virtualWrite(V1, h);
     Blynk.virtualWrite(V2, t);
     Blynk.virtualWrite(V4, soilPercent1);
     Blynk.virtualWrite(V5, soilPercent2);
-    Blynk.virtualWrite(V6, Plant1);
-    Blynk.virtualWrite(V7, Plant2);
+    Blynk.virtualWrite(V6, 15 - Plant1);
+    Blynk.virtualWrite(V7, 15 - Plant2);
     // เปลี่ยนหน้า LCD
     lcdPage++;
     if (lcdPage > 2) lcdPage = 0;
@@ -417,12 +531,19 @@ void setup() {
   Blynk.begin(BLYNK_AUTH_TOKEN, WIFI_SSID, WIFI_PASS);
   Wire.begin(21, 22);  // SDA, SCL
 
+  bool parse = false;
+  bool config = false;  // ตั้งเวลา DS1307 จากเวลาคอมไพล์
+  if (getDate(__DATE__) && getTime(__TIME__)) {
+    parse = true;
+    if (RTC.write(tm)) { config = true; }
+  }
+
   pinMode(TRIG1, OUTPUT);
   pinMode(ECHO1, INPUT);
   pinMode(TRIG2, OUTPUT);
   pinMode(ECHO2, INPUT);
-  pinMode(LED_PIN, OUTPUT);
-  pinMode(PUMP_PIN, OUTPUT);
+  // pinMode(LED_PIN, OUTPUT);
+  // pinMode(PUMP_PIN, OUTPUT);
 
   pinMode(INT_PIN, INPUT_PULLUP);
   attachInterrupt(digitalPinToInterrupt(INT_PIN), handleInterrupt, RISING);
@@ -445,12 +566,14 @@ void loop() {
   Blynk.run();
   timer.run();
   KeypadGate();
+
   if (dataReady) {
     dataReady = false;
     requestSensorData();
   }
+
   if (PumpAuto == 1) {
-    if (soilPercent1 < 45 || soilPercent2 < 45) {
+    if ((soilPercent1 + soilPercent2) / 2 < 45) {
       PumpStatus = 1;
     } else {
       PumpStatus = 0;
