@@ -1,0 +1,21 @@
+version: "3.9"
+services:
+  flask-camera:
+    build: .
+    container_name: flask-camera
+    restart: unless-stopped
+    ports:
+      - "5000:5000"
+    # privileged: true       # ลบออกบน Windows
+    # devices:               # ลบออกบน Windows
+    #   - "/dev/video0:/dev/video0"
+
+  ngrok:
+    image: ngrok/ngrok:latest
+    container_name: ngrok
+    restart: unless-stopped
+    depends_on:
+      - flask-camera
+    env_file:
+      - .env           # <-- ต้องอยู่ใน service ngrok
+    command: http flask-camera:5000 --authtoken ${NGROK_TOKEN} --log=stdout
