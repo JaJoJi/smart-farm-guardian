@@ -214,9 +214,13 @@ void loop() {
 
   // Serial Radar Monitor
   Serial.print(angle);
+  Serial.print(",");
   Serial.print(dt1);
+  Serial.print(",");
   Serial.print(dt2);
+  Serial.print(",");
   Serial.print(dt3);
+  Serial.print(",");
   Serial.println(dt4);
 
   wdt_reset();  // กัน watchdog reset
