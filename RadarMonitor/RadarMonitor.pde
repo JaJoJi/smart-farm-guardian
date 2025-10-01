@@ -90,7 +90,7 @@ void draw() {
   fill(sensorColor[2]);  text("Sensor D3", -width/2 + 80, -height/2 + 90);
   fill(sensorColor[3]);  text("Sensor D4", -width/2 + 80, -height/2 + 120);
 
-  // N,E,S,W
+  // N,E,S,W Direction
   textSize(20);
   fill(0, 255, 0);
   text("N", 0, -maxRange - 20);
@@ -110,13 +110,6 @@ void draw() {
     text(alertText, 0, -height/2 + 50);
   }
 }
-
-
-
-
-
-
-
 
 void serialEvent(Serial p) {
   String line = p.readStringUntil('\n');
