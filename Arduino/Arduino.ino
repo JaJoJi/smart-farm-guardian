@@ -64,7 +64,7 @@ void receiveEvent(int howMany) {
           tone(BuzzerAlarm, 1000, 200);  // Beebz 1kHz for 200ms
           wdt_reset();
         } else {
-          LockServo.write(0);
+          LockServo.write(150);
           tone(BuzzerAlarm, 500, 1000);  // Beebz 500Hz for 500ms
           wdt_reset();
         }
@@ -146,7 +146,7 @@ void setup() {
   // Attach Servo after Lock1 with initialize
   LockServo.attach(ServoDrive);
   delay(50);  // Let's Servo have settle time
-  LockServo.write(0);
+  LockServo.write(150);
 
   // Radar Servo
   RadarServo.attach(ServoDrift, 500, 2500);
@@ -207,7 +207,7 @@ void loop() {
       LockServo.write(70);
       tone(BuzzerAlarm, 1000, 200);
     } else {
-      LockServo.write(0);
+      LockServo.write(150);
       tone(BuzzerAlarm, 500, 1000);
     }
   }
