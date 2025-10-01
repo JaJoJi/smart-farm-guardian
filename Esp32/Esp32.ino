@@ -65,6 +65,7 @@ DHT dht(DHTPIN, DHTTYPE);
 // ========== Timer ==========
 BlynkTimer timer;
 tmElements_t tm;
+bool setOnce = false;  // flag สำหรับตั้งเวลาแค่ครั้งแรก
 
 // ========== Timer Function ==========
 bool getTime(const char *str) {
@@ -79,13 +80,17 @@ bool getTime(const char *str) {
 bool getDate(const char *str) {
   char Month[12];
   int Day, Year;
-  static const char *monthName[12] = { "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec" };
+  static const char *monthName[12] =
+    { "Jan","Feb","Mar","Apr","May","Jun",
+      "Jul","Aug","Sep","Oct","Nov","Dec" };
   uint8_t monthIndex;
+
   if (sscanf(str, "%s %d %d", Month, &Day, &Year) != 3) return false;
   for (monthIndex = 0; monthIndex < 12; monthIndex++) {
     if (strcmp(Month, monthName[monthIndex]) == 0) break;
   }
   if (monthIndex >= 12) return false;
+
   tm.Day = Day;
   tm.Month = monthIndex + 1;
   tm.Year = CalendarYrToTm(Year);
@@ -186,13 +191,12 @@ void requestSensorData() {
   }
 }
 // ========================= SHOW DATETIME =========================
-void updateDateTimeOnLCD() {
-  tmElements_t tmLocal;
-  if (RTC.read(tmLocal)) {
+void updateDateTimeOnLCD() {;
+  if (RTC.read(tm)) {
     char buf1[17], buf2[17];
-    int year = tmYearToCalendar(tmLocal.Year) + 543;
-    sprintf(buf1, "%02d/%02d/%04d", tmLocal.Day, tmLocal.Month, year);
-    sprintf(buf2, "%02d:%02d:%02d", tmLocal.Hour, tmLocal.Minute, tmLocal.Second);
+    int year = tmYearToCalendar(tm.Year) + 543;
+    sprintf(buf1, "%02d/%02d/%04d", tm.Day, tm.Month, year);
+    sprintf(buf2, "%02d:%02d:%02d", tm.Hour, tm.Minute, tm.Second);
     lcdKeypad.setCursor(0, 0);
     lcdKeypad.print("Date: ");
     lcdKeypad.print(buf1);
@@ -531,12 +535,25 @@ void setup() {
   Blynk.begin(BLYNK_AUTH_TOKEN, WIFI_SSID, WIFI_PASS);
   Wire.begin(21, 22);  // SDA, SCL
 
-  bool parse = false;
-  bool config = false;  // ตั้งเวลา DS1307 จากเวลาคอมไพล์
-  if (getDate(__DATE__) && getTime(__TIME__)) {
-    parse = true;
-    if (RTC.write(tm)) { config = true; }
+  bool parse = false, config = false;
+
+
+  if (!RTC.read(tm)) {
+    Serial.println("RTC not running, setting the time now!");
+
+    // แปลงเวลา compile time เป็น tmElements_t
+    if (getDate(__DATE__) && getTime(__TIME__)) {
+      RTC.write(tm);   // เขียนเข้า DS1307
+      Serial.println("RTC time set from compile time.");
+    } else {
+      Serial.println("Failed to parse compile time!");
+    }
+  } else {
+    Serial.println("RTC is running already.");
   }
+
+
+
 
   pinMode(TRIG1, OUTPUT);
   pinMode(ECHO1, INPUT);
